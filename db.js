@@ -13,6 +13,7 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT DEFAULT 'default_user',
       item_name TEXT NOT NULL,
       quantity TEXT DEFAULT '1',
       status TEXT DEFAULT 'to_buy',

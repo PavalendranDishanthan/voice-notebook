@@ -10,7 +10,10 @@ import {
   Volume2
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000/api';
+// Dynamically determine the backend URL based on where the app is being accessed from
+const API_BASE = window.location.hostname === 'localhost' 
+  ? 'http://localhost:5000/api' 
+  : `http://${window.location.hostname}:5000/api`;
 
 export default function App() {
   const [items, setItems] = useState([]);
@@ -23,6 +26,8 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('');
   const [activeItemForPrice, setActiveItemForPrice] = useState(null);
   const [enteredPrice, setEnteredPrice] = useState('');
+  const [activeTab, setActiveTab] = useState('to_buy'); // 'to_buy', 'bought', 'summary'
+
 
   const recognitionRef = useRef(null);
 
@@ -54,24 +59,42 @@ export default function App() {
   const addItemDirectly = async (textToSend) => {
     if (!textToSend || !textToSend.trim()) return;
     setLoading(true);
-    setStatusMessage('Saving item to database...');
+    setStatusMessage('Processing...');
 
     try {
       const res = await fetch(`${API_BASE}/process-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textToSend.trim() }),
+        body: JSON.stringify({ text: textToSend.trim(), language }),
       });
 
       if (res.ok) {
-        setStatusMessage('✓ Item added successfully!');
+        const data = await res.json();
+        setStatusMessage('✓ Processed successfully!');
+        
+        if (data.intent === 'navigate' && data.target) {
+          setActiveTab(data.target);
+        }
+
+        if (data.speechText && window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(data.speechText);
+          
+          // Slow down the speech to make it clearer (1.0 is default, 0.75 is slower)
+          utterance.rate = 0.75; 
+          
+          if (language === 'ta') utterance.lang = 'ta-IN';
+          else if (language === 'si') utterance.lang = 'si-LK';
+          else utterance.lang = 'en-US';
+          window.speechSynthesis.speak(utterance);
+        }
+
         await fetchData();
         setTimeout(() => setStatusMessage(''), 2500);
       } else {
-        setStatusMessage('Error saving item');
+        setStatusMessage('Error processing request');
       }
     } catch (err) {
-      console.error('Network error adding item:', err);
+      console.error('Network error:', err);
       setStatusMessage('Network connection error to backend');
     } finally {
       setLoading(false);
@@ -286,185 +309,251 @@ export default function App() {
         )}
       </section>
 
-      {/* Manual Input Bar */}
-      <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', marginBottom: '32px' }}>
-        <input
-          type="text"
-          value={textInput}
-          onChange={(e) => setTextInput(e.target.value)}
-          placeholder={language === 'ta' ? 'அல்லது இங்கே தட்டச்சு செய்க...' : 'Or type items here (e.g. 2 banana)...'}
-          style={{
-            flex: 1,
-            background: 'rgba(18, 24, 38, 0.8)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '16px',
-            padding: '14px 18px',
-            fontSize: '14px',
-            color: '#fff',
-            outline: 'none'
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading || !textInput.trim()}
-          style={{
-            border: 'none',
-            background: '#6366f1',
-            color: '#fff',
-            padding: '0 20px',
-            borderRadius: '16px',
-            fontWeight: '600',
-            fontSize: '14px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <Plus size={18} />
-          <span>Add</span>
-        </button>
-      </form>
+      {/* Tabs Navigation */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: 'rgba(30, 41, 59, 0.4)', padding: '6px', borderRadius: '16px' }}>
+        {[
+          { id: 'to_buy', label: 'To Buy', count: toBuy.length },
+          { id: 'bought', label: 'Bought', count: bought.length },
+          { id: 'summary', label: 'Summary' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              flex: 1,
+              border: 'none',
+              background: activeTab === tab.id ? '#4f46e5' : 'transparent',
+              color: activeTab === tab.id ? '#fff' : '#94a3b8',
+              padding: '10px',
+              borderRadius: '12px',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}
+          >
+            {tab.label}
+            {tab.count !== undefined && (
+              <span style={{ 
+                background: activeTab === tab.id ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)', 
+                padding: '2px 6px', 
+                borderRadius: '8px', 
+                fontSize: '10px' 
+              }}>
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-      {/* To Buy Items */}
-      <section style={{ marginBottom: '36px' }}>
-        <h3 style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#818cf8', marginBottom: '14px' }}>
-          To Buy Items ({toBuy.length})
-        </h3>
+      {activeTab === 'to_buy' && (
+        <>
+          {/* Manual Input Bar */}
+          <form onSubmit={handleTextSubmit} style={{ display: 'flex', gap: '10px', marginBottom: '32px' }}>
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder={language === 'ta' ? 'அல்லது இங்கே தட்டச்சு செய்க...' : 'Or type items here (e.g. 2 banana)...'}
+              style={{
+                flex: 1,
+                background: 'rgba(18, 24, 38, 0.8)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '16px',
+                padding: '14px 18px',
+                fontSize: '14px',
+                color: '#fff',
+                outline: 'none'
+              }}
+            />
+            <button
+              type="submit"
+              disabled={loading || !textInput.trim()}
+              style={{
+                border: 'none',
+                background: '#6366f1',
+                color: '#fff',
+                padding: '0 20px',
+                borderRadius: '16px',
+                fontWeight: '600',
+                fontSize: '14px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Plus size={18} />
+              <span>Add</span>
+            </button>
+          </form>
 
-        {toBuy.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '36px 16px', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '20px', border: '1px dashed rgba(255, 255, 255, 0.08)', color: '#64748b', fontSize: '13px' }}>
-            Your basket is empty. Tap the mic to record!
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {toBuy.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => setActiveItemForPrice(item)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '16px 18px',
-                  background: 'rgba(24, 32, 51, 0.65)',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
-                  borderRadius: '18px',
-                  cursor: 'pointer'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '10px',
-                    background: 'rgba(99, 102, 241, 0.15)',
-                    border: '1px solid rgba(99, 102, 241, 0.3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#818cf8'
-                  }}>
-                    <Check size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '15px', fontWeight: '600', color: '#f8fafc', textTransform: 'capitalize' }}>
-                      {item.item_name}
+          {/* To Buy Items */}
+          <section style={{ marginBottom: '36px' }}>
+            {toBuy.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '36px 16px', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '20px', border: '1px dashed rgba(255, 255, 255, 0.08)', color: '#64748b', fontSize: '13px' }}>
+                Your basket is empty. Tap the mic to record!
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {toBuy.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => setActiveItemForPrice(item)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '16px 18px',
+                      background: 'rgba(24, 32, 51, 0.65)',
+                      border: '1px solid rgba(255, 255, 255, 0.06)',
+                      borderRadius: '18px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <div style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '10px',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#818cf8'
+                      }}>
+                        <Check size={16} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '15px', fontWeight: '600', color: '#f8fafc', textTransform: 'capitalize' }}>
+                          {item.item_name}
+                        </div>
+                        <span style={{
+                          display: 'inline-block',
+                          marginTop: '4px',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          padding: '2px 8px',
+                          background: 'rgba(99, 102, 241, 0.18)',
+                          color: '#c7d2fe',
+                          borderRadius: '6px'
+                        }}>
+                          {item.quantity}
+                        </span>
+                      </div>
                     </div>
-                    <span style={{
-                      display: 'inline-block',
-                      marginTop: '4px',
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      padding: '2px 8px',
-                      background: 'rgba(99, 102, 241, 0.18)',
-                      color: '#c7d2fe',
-                      borderRadius: '6px'
-                    }}>
-                      {item.quantity}
+
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#818cf8' }}>
+                      Mark Done →
                     </span>
                   </div>
-                </div>
-
-                <span style={{ fontSize: '12px', fontWeight: '600', color: '#818cf8' }}>
-                  Mark Done →
-                </span>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            )}
+          </section>
+        </>
+      )}
 
-      {/* Already Bought Section */}
-      {bought.length > 0 && (
+      {activeTab === 'bought' && (
         <section style={{ marginBottom: '36px' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#64748b', marginBottom: '14px' }}>
-            Already Bought ({bought.length})
-          </h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {bought.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 16px',
-                  background: 'rgba(15, 23, 42, 0.35)',
-                  border: '1px solid rgba(255, 255, 255, 0.04)',
-                  borderRadius: '14px',
-                  color: '#64748b',
-                  fontSize: '14px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
-                  <span style={{ textDecoration: 'line-through', textTransform: 'capitalize', color: '#94a3b8' }}>
-                    {item.item_name} ({item.quantity})
-                  </span>
+          {bought.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '36px 16px', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '20px', border: '1px dashed rgba(255, 255, 255, 0.08)', color: '#64748b', fontSize: '13px' }}>
+              You haven't bought anything yet.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {bought.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 16px',
+                    background: 'rgba(15, 23, 42, 0.35)',
+                    border: '1px solid rgba(255, 255, 255, 0.04)',
+                    borderRadius: '14px',
+                    color: '#64748b',
+                    fontSize: '14px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ textDecoration: 'line-through', textTransform: 'capitalize', color: '#94a3b8' }}>
+                        {item.item_name} ({item.quantity})
+                      </span>
+                      {item.bought_at && (
+                        <span style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>
+                          {new Date(item.bought_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    color: '#34d399',
+                    background: 'rgba(16, 185, 129, 0.1)',
+                    padding: '4px 10px',
+                    borderRadius: '8px'
+                  }}>
+                    {item.price ? `Rs. ${item.price.toFixed(2)}` : '✓ Done'}
+                  </div>
                 </div>
-                <div style={{
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  color: '#34d399',
-                  background: 'rgba(16, 185, 129, 0.1)',
-                  padding: '4px 10px',
-                  borderRadius: '8px'
-                }}>
-                  {item.price ? `Rs. ${item.price.toFixed(2)}` : '✓ Done'}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
-      {/* Summary Box */}
-      {summary && summary.breakdown && summary.breakdown.length > 0 && (
+      {activeTab === 'summary' && (
         <section className="glass-panel" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Receipt size={18} color="#818cf8" />
-              <h4 style={{ fontSize: '13px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#c7d2fe' }}>
-                Total Spending
-              </h4>
-            </div>
-            <div style={{ fontSize: '18px', fontWeight: '800', color: '#34d399', fontFamily: 'monospace' }}>
-              Rs. {summary.grandTotal}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px', fontSize: '13px' }}>
-            {summary.breakdown.map((row, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
-                <span style={{ textTransform: 'capitalize' }}>{row.item_name}</span>
-                <span style={{ color: '#94a3b8', fontSize: '12px' }}>
-                  Bought {row.total_bought_count}x {row.item_total_spent ? `(Rs. ${row.item_total_spent})` : ''}
-                </span>
+          {summary && summary.breakdown && Object.keys(summary.breakdown).length > 0 ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Receipt size={18} color="#818cf8" />
+                  <h4 style={{ fontSize: '13px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#c7d2fe' }}>
+                    Total Spending
+                  </h4>
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#34d399', fontFamily: 'monospace' }}>
+                  Rs. {summary.grandTotal}
+                </div>
               </div>
-            ))}
-          </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '14px', fontSize: '13px' }}>
+                {Object.keys(summary.breakdown).map((date) => (
+                  <div key={date}>
+                    <h5 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '4px' }}>
+                      {new Date(date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </h5>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {summary.breakdown[date].map((row, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                          <span style={{ textTransform: 'capitalize' }}>{row.item_name}</span>
+                          <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+                            Bought {row.total_bought_count}x {row.item_total_spent ? `(Rs. ${row.item_total_spent})` : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+             <div style={{ textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+               No summary available yet.
+             </div>
+          )}
         </section>
       )}
 
